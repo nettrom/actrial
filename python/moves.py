@@ -144,7 +144,12 @@ def gather_data(db_conn, move_date, namespaces=None):
             db_cursor.execute('set profiling = 0')
         
         for row in db_cursor:
-            rev_comment = row['rev_comment'].decode('utf-8')
+            try:
+                rev_comment = row['rev_comment'].decode('utf-8')
+            except UnicodeDecodeError:
+                logging.warning('unable to decode rev_comment, unicode error?')
+                continue
+                
             match = move_comment_re.match(rev_comment)
             if not match:
                 continue
