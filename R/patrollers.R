@@ -2,14 +2,44 @@
 
 library(ggplot);
 library(data.frame);
+library(reldist);
 
 ## Load in the datasets
 patrolactions = fread('datasets/patrolactions_by_day.tsv');
 patrollers = fread('datasets/patrollers_by_day.tsv');
+patroller_distribution = fread('datasets/patroller_distribution.tsv');
 
 ## Fix dates
 patrolactions[, log_date := as.IDate(date)];
 patrollers[, log_date := as.IDate(date)];
+patroller_distribution[, log_date := as.IDate(pat_date)];
+
+## Calculate Gini coefficient over each day
+patroller_gini = patroller_distribution[, list(pat_gini=gini(pat_num_actions)),
+                                        by=log_date];
+
+## Also the 75th percentile
+patroller_75th = patroller_distribution[
+  ,list(pat_75th=as.numeric(quantile(pat_num_actions, probs=c(0.75)))),
+  by=log_date];
+
+## Problem with the 75th percentile is that it can stay constant as the size
+## of the population grows. How about we instead calculate the number of review
+## actions performed by the top 25% of patrollers?
+top_quantile_reviews = function(review_actions, prob=0.25) {
+  ## Calculate the number of review actions done by the "prob" quantile of top
+  ## reviewers.
+  idx = round(length(review_actions) * prob);
+  sum(sort(review_actions, decreasing = TRUE)[1:idx]);
+}
+
+top_quantile_reviews(patroller_distribution[log_date == '2017-01-01']$pat_num_actions)
+
+top_patrollers = patroller_distribution[
+  ,list(total_actions=sum(pat_num_actions),
+        top25_actions=top_quantile_reviews(pat_num_actions)),
+  by=log_date
+]
 
 ## H9: Number of patrol actions
 ggplot(patrolactions, aes(x=log_date, y=num_patrol_actions)) + geom_line() +
@@ -75,3 +105,24 @@ ggplot(creations_and_moves[, list(n_articles=sum(n_articles)), by=c_date],
   scale_x_date(date_breaks='1 years', date_labels = '%Y') +
   scale_y_continuous(expand = c(0, 0), limits = c(0, 2750)) +
   xlab('Date') + ylab('Number of articles')
+
+## Patroller distribution as measured by the Gini coefficient
+ggplot(patroller_gini, aes(x=log_date, y=pat_gini)) + geom_line() +
+  ggtitle('Gini coefficient of patroller actions') +
+  scale_x_date(date_breaks='1 years', date_labels = '%Y') +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 1)) +
+  xlab('Date') + ylab('Gini coefficient');
+
+## 75th percentile
+ggplot(patroller_75th, aes(x=log_date, y=pat_75th)) + geom_line() +
+  ggtitle('75th percentile of patroller actions') +
+  scale_x_date(date_breaks='1 years', date_labels = '%Y') +
+  xlab('Date') + ylab('Number of patrol actions');
+
+## How much of the patrolling is done by the top 25% of patrollers?
+ggplot(top_patrollers[, list(log_date, prop_top=100*top25_actions/total_actions)],
+       aes(x=log_date, y=prop_top)) + geom_line() +
+  ggtitle('Proportion of total patrol actions done by most active quartile') +
+  scale_x_date(date_breaks='1 years', date_labels = '%Y') +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 100), breaks=seq(0,100,10)) +
+  xlab('Date') + ylab('Proportion in percent');

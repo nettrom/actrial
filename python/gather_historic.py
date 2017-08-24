@@ -37,6 +37,7 @@ import registrations
 import autoconfirmed
 import survival
 import moves
+import patrollers
 
 def insert_newaccounts(local_db, wiki_db, start_date, end_date):
     '''
@@ -552,9 +553,84 @@ def insert_moves(local_db, wiki_db, start_date, end_date):
     wiki_db_conn.close()
     return()
 
+def insert_patrollers(local_db, wiki_db, start_date, end_date):
+    '''
+    Gather data on the numer of patrol actions performed by each active patroller
+    from the given start date up to, but not including, the given end date,
+    then insert that into our local database.
+
+    :param local_db: Connection information for connecting to the local
+                     database where summary info is stored
+    :type local_db: dict
+
+    :param wiki_db: Connection information for connecting to the replicated
+                    Wikipedia database
+    :type wiki_db: dict
+
+    :param start_date: date at which to start gathering data
+    :type end_date: datetime.date
+
+    :param end_date: date at which to stop gathering data
+    :type end_date: datetime.dt
+    '''
+
+    update_query = '''INSERT INTO patrollers
+                      (pat_userid, pat_date, pat_num_actions)
+                      VALUES (%s, %s, %s)'''
+
+    local_db_conn = db.connect(local_db['hostname'], local_db['dbname'],
+                               local_db['dbconf'])
+    if not local_db_conn:
+        logging.error('unable to connect to local database server {}'.format(local_db['hostname']))
+        return()
+
+    wiki_db_conn = db.connect(wiki_db['hostname'], wiki_db['dbname'],
+                              wiki_db['dbconf'])
+    if not wiki_db_conn:
+        logging.error('unable to connect to replicated database server {}'.format(wiki_db['hostname']))
+        return()
+
+    ## Batch size for database commits
+    batch_size = 1000
+    
+    ## We'll process a week in each iteration:
+    time_step = dt.timedelta(days=7)
+    
+    cur_date = start_date
+    while cur_date < end_date:
+        stop_date = cur_date + time_step
+        if stop_date > end_date:
+            stop_date = end_date
+
+        datapoints = patrollers.gather_historic(wiki_db_conn,
+                                                cur_date, stop_date)
+        with db.cursor(local_db_conn) as db_cursor:
+            i = 0
+            for datapoint in datapoints:
+                db_cursor.execute(update_query,
+                                  (datapoint.userid,
+                                   datapoint.date,
+                                   datapoint.num_actions))
+                i += 1
+                if i % batch_size == 0:
+                    logging.info('processed {} datapoints, comitting'.format(i))
+                    local_db_conn.commit()
+
+            ## Commit any outstanding inserts
+            logging.info('processed {} datapoints, final commit'.format(i))
+            local_db_conn.commit()
+
+        print('Completed inserting data from {} to {}'.format(cur_date,
+                                                              stop_date))
+        cur_date += time_step
+
+    wiki_db_conn.close()
+    local_db_conn.close()
+    return()
+
 def insert_historic(start_date, end_date, run_everything, run_newaccounts,
                     run_registrations, run_first30, run_autoconfirmed,
-                    run_survival, run_moves):
+                    run_survival, run_moves, run_patrollers):
     '''
     Gather historic data for the various statistics we are interested in
     and populate our database tables. Supplied start and end dates can be
@@ -587,6 +663,9 @@ def insert_historic(start_date, end_date, run_everything, run_newaccounts,
 
     :param run_moves: insert counts of moves from User/Draft namespaces into main
     :type run_moves: bool
+
+    :param run_patrollers: insert counts of patroller actions?
+    :type run_patrollers: bool
     '''
 
     db_conf = '~/replica.my.cnf'
@@ -620,6 +699,10 @@ def insert_historic(start_date, end_date, run_everything, run_newaccounts,
     if run_everything or run_moves:
         logging.info("Gathering counts of moves from User/Draft into main")
         insert_moves(local_db, wiki_db, start_date, end_date)
+
+    if run_everything or run_patrollers:
+        logging.info("Gathering counts of patrol actions done by patrollers")
+        insert_patrollers(local_db, wiki_db, start_date, end_date)
         
     return()
 
@@ -640,6 +723,9 @@ def main():
     cli_parser.add_argument('-v', '--verbose', action='store_true',
                             help='write informational output')
 
+    cli_parser.add_argument('--all', action='store_true',
+                            help='insert/update everything')
+
     cli_parser.add_argument('--newaccounts', action='store_true',
                             help='insert counts of the number of registered accounts')
 
@@ -658,8 +744,8 @@ def main():
     cli_parser.add_argument('--moves', action='store_true',
                             help='insert counts of the number of moves into article namespace from User and Draft namespaces')
 
-    cli_parser.add_argument('--all', action='store_true',
-                            help='insert/update everything')
+    cli_parser.add_argument('--patrollers', action='store_true',
+                            help='insert counts of the number of patrol actions per active patroller')
 
     cli_parser.add_argument('start_date', type=valid_date,
                             help='start date for gathering data (format: YYYY-MM-DD)')
@@ -674,7 +760,7 @@ def main():
 
     insert_historic(args.start_date, args.end_date, args.all, args.newaccounts,
                     args.registrations, args.first30, args.autoconfirmed,
-                    args.survival, args.moves)
+                    args.survival, args.moves, args.patrollers)
         
     return()
 
