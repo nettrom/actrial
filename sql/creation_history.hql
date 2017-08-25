@@ -2,12 +2,13 @@
 -- English Wikipedia. This query is based on
 -- https://phabricator.wikimedia.org/T149021#3281771
 -- but adapted to remove current redirects and use improved redirect
--- detection, both mentioned later in the same Phabricator task.
+-- detection, both mentioned later in the same Phabricator task. It has
+-- also been modified to not ignore deleted articles.
 -- Note: this does not identify articles published by moving them into
 -- the main namespace from other namespaces.
 
 USE wmf;
-SELECT event_timestamp, event_comment, revision_id, event_user_id
+SELECT event_timestamp, revision_id, event_user_id
 FROM mediawiki_history
 WHERE wiki_db = 'enwiki'
   AND event_entity = 'revision'
@@ -26,6 +27,4 @@ WHERE wiki_db = 'enwiki'
            AND event_comment NOT REGEXP '\\{\\{R from '
            AND event_comment NOT REGEXP '.*moved .*\\[\\[([^\]]+)\\]\\] to \\[\\[([^\]]+)\\]\\].*'))
   AND TO_DATE(event_timestamp) >= '2009-01-01'
-  AND TO_DATE(event_timestamp) < '2009-01-02'
-  AND event_user_id IS NOT NULL
   AND snapshot = '2017-07';
