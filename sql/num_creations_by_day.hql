@@ -6,7 +6,7 @@
 -- Note: this does not identify articles published by moving them into
 -- the main namespace from other namespaces.
 USE wmf;
-SELECT SUBSTR(event_timestamp, 0, 8) AS day,
+SELECT TO_DATE(event_timestamp) AS day,
        COUNT(*) AS num_creations
 FROM mediawiki_history
 WHERE wiki_db = 'enwiki'
@@ -16,8 +16,9 @@ WHERE wiki_db = 'enwiki'
   AND revision_parent_id = 0
   AND LCASE(event_comment) NOT REGEXP 'redir'
   AND event_comment NOT REGEXP '\\{\\{R from '
+  AND event_comment NOT REGEXP '.*moved .*\\[\\[([^\]]+)\\]\\] to \\[\\[([^\]]+)\\]\\].*'
   AND snapshot = '2017-07'
-  AND event_timestamp >= '20090101000000'
-GROUP BY SUBSTR(EVENT_TIMESTAMP, 0, 8)
+  AND TO_DATE(event_timestamp) >= '2017-01-01'
+GROUP BY TO_DATE(event_timestamp)
 ORDER BY day
 LIMIT 10000;

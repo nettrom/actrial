@@ -47,8 +47,8 @@ def populate_table(table_name, input_filename, batch_size=1000):
     '''
 
     insert_query = '''INSERT INTO {table}
-                      (ac_rev_id, ac_timestamp, ac_user_id)
-                      VALUES (%s, %s, %s)'''.format(table=table_name)
+                      (ac_rev_id, ac_timestamp)
+                      VALUES (%s, %s)'''.format(table=table_name)
 
     db_conn = db.connect('tools.labsdb', 's53463__actrial_p', '~/replica.my.cnf')
     if not db_conn:
@@ -59,25 +59,31 @@ def populate_table(table_name, input_filename, batch_size=1000):
         infile.readline() # skip header
 
         i = 0
-        
+        datapoints = []
         with db.cursor(db_conn) as db_cursor:
             for line in infile:
-                (rev_timestamp, rev_id, rev_user_id) = line.strip().split('\t')
+                (rev_timestamp, rev_id) = line.strip().split('\t')
                 rev_timestamp = dt.datetime.strptime(rev_timestamp,
                                                      '%Y-%m-%d %H:%M:%S.0')
                 rev_id = int(rev_id)
-                rev_user_id = int(rev_user_id)
-                
-                db_cursor.execute(insert_query,
-                                  (rev_id, rev_timestamp, rev_user_id))
+
+                datapoints.append((rev_id, rev_timestamp))
+
                 i += 1
                 if i % batch_size == 0:
+                    db_cursor.executemany(insert_query,
+                                          datapoints)
                     logging.info('inserted {} entries, committing'.format(i))
                     db_conn.commit()
+                    datapoints = []
+            
+            # commit any outstanding inserts
+            db_cursor.executemany(insert_query,
+                                  datapoints)
+            logging.info('inserted {} entries, committing'.format(i))
+            db_conn.commit()
 
-        # commit any outstanding inserts
-        db_conn.commit()
-        db_conn.close()
+    db_conn.close()
 
     logging.info('completed inserting {} entries'.format(i))
         

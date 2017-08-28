@@ -4,7 +4,5 @@
 USE s53463__actrial_p;
 CREATE TABLE articlecreations (
     ac_rev_id INT UNSIGNED PRIMARY KEY,
-    ac_timestamp DATETIME NOT NULL,
-    ac_user_id INT UNSIGNED NOT NULL,
-    KEY user_time (ac_user_id, ac_timestamp)
+    ac_timestamp DATETIME NOT NULL
 );
