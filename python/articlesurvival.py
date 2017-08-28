@@ -40,7 +40,7 @@ DataPoint = namedtuple('DataPoint', ['userid', 'created_article',
                                      'article_survived'])
 
 ## Number of accounts we'll process at a time when doing batches
-batch_size = 100
+batch_size = 500
 
 def gather_data(wiki_db_conn, local_db_conn, user_ids, horizon=30):
     '''
@@ -48,6 +48,12 @@ def gather_data(wiki_db_conn, local_db_conn, user_ids, horizon=30):
     a new article, and if so, whether the article survived for a given
     number of days (typically 30). Returns a list of data points with
     information, in no specific order.
+
+    Note: this function assumes that the supplied user IDs made at least
+          one edit in their first 30 days since account registration.
+
+    Note: this function also assumes that a specifically named temporary table
+          exists for storing creation information.
 
     :param wiki_db_conn: Database connection to the replicated Wikipedia DB
     :type wiki_db_conn: MySQLdb.Connection
@@ -106,9 +112,23 @@ def gather_data(wiki_db_conn, local_db_conn, user_ids, horizon=30):
                          ORDER BY rev_timestamp ASC LIMIT 1'''
 
     ## Query to see if that edit is found in the article creation database
+    ##creation_query = '''SELECT *
+    ##                    FROM articlecreations
+    ##                    WHERE ac_rev_id = %(rev_id)s'''
+
+    ## More efficient query is to look up a whole bunch of them at the same
+    ## time:
     creation_query = '''SELECT *
                         FROM articlecreations
-                        WHERE ac_rev_id = %(rev_id)s'''
+                        WHERE ac_rev_id IN ({id_list})'''
+
+    ## Query to insert an article creation event into the temporary
+    ## table.
+    temp_insert_query = '''INSERT INTO s53463__actrial_p.creations
+                           VALUES (%s, %s, %s)'''
+
+    ## Query to empty the temp table
+    temp_delete_query = '''DELETE FROM s53463__actrial_p.creations'''
 
     ## Query to find if a given article was deleted within thirty days
     ## after creation
@@ -120,58 +140,113 @@ def gather_data(wiki_db_conn, local_db_conn, user_ids, horizon=30):
                         AND log_timestamp < %(expiry_timestamp)s
                         AND log_page = %(page_id)s'''
 
+    ## Query to find if a group of articles were deleted within thirty
+    ## days of their creation
+    deletion_query = '''SELECT log_page, log_timestamp, c.user_id AS fe_user_id
+                        FROM logging_logindex l
+                        JOIN s53463__actrial_p.creations c
+                        ON l.log_page=c.page_id
+                        WHERE l.log_type='delete'
+                        AND l.log_action='delete'
+                        AND l.log_timestamp > c.rev_timestamp
+                        AND l.log_timestamp < DATE_FORMAT(
+                                                DATE_ADD(
+                                                  STR_TO_DATE(c.rev_timestamp,
+                                                              "%Y%m%d%H%i%S"),
+                                                  INTERVAL 30 DAY),
+                                                "%Y%m%d%H%i%S")'''
+
     horizon_delta = dt.timedelta(days=horizon)
 
     ## Data points we'll return
     datapoints = []
-    
-    for user_id in user_ids:
+
+    i = 0
+    while i < len(user_ids):
+        logging.info('processing subset [{}:{}]'.format(i, i+batch_size))
+        
+        subset = user_ids[i : i + batch_size]
+
+        ## Mapping user ID to info about the user's first edit,
+        ## and mapping a revision ID to the user info
+        candidates = {}
+        rev_cand_map = {}
+
         with db.cursor(wiki_db_conn, 'dict') as db_cursor:
-            ## Find the user's first edit
-            fe_timestamp = None
-            fe_rev_id = None
-            fe_page_id = None
-            fe_page_namespace = None
-            fe_page_title = None
-            fe_source = None
+            for user_id in subset:
+                ## Find the user's first edit
+                db_cursor.execute(firstedit_query.format(
+                    user_id=user_id))
+                for row in db_cursor:
+                    ## We might not get data
+                    if not row['rev_id']:
+                        continue
+                    
+                    candidates[user_id] = {
+                        'fe_user_id': user_id,
+                        'fe_timestamp': row['rev_timestamp'],
+                        'fe_rev_id' : row['rev_id'],
+                        'fe_page_id': row['page_id'],
+                        'fe_page_namespace': row['page_namespace'],
+                        'fe_page_title': row['page_title'].decode('utf-8'),
+                        'fe_source': row['source']}
 
-            db_cursor.execute(firstedit_query.format(
-                user_id=user_id))
-            for row in db_cursor:
-                fe_timestamp = row['rev_timestamp'].decode('utf-8')
-                fe_rev_id = row['rev_id']
-                fe_page_id = row['page_id']
-                fe_page_namespace = row['page_namespace']
-                fe_page_title = row['page_title'].decode('utf-8')
-                fe_source = row['source']
+                    rev_cand_map[row['rev_id']] = candidates[user_id]
 
-        ## See if that first edit created an article
-        fe_created_article = 0
-        with db.cursor(local_db_conn, 'dict') as db_cursor:
-            db_cursor.execute(creation_query,
-                              {'rev_id': fe_rev_id})
-            for row in db_cursor:
-                fe_created_article = 1
+        logging.info('checking if first edits created an article')
+                    
+        ## See if that first edit created an article and insert that
+        ## into the temporary table
+        j = 0
+        with db.cursor(local_db_conn, 'dict') as local_db_cursor:
+            with db.cursor(wiki_db_conn, 'dict') as wiki_db_cursor:
+                ## Make a comma-separated list of their first edit revision IDs
+                rev_ids = ','.join(
+                    [str(p['fe_rev_id']) for p in candidates.values()])
+                local_db_cursor.execute(creation_query.format(
+                    id_list = rev_ids))
+
+                ## Insert first edits into the temp table and update
+                ## the candidate info
+                for row in local_db_cursor:
+                    j += 1
+                    candidate = rev_cand_map[row['ac_rev_id']]
+                    candidate['fe_created_article'] = 1
+                    candidate['fe_article_survived'] = 1
+                    wiki_db_cursor.execute(temp_insert_query,
+                                           (candidate['fe_page_id'],
+                                            candidate['fe_timestamp'],
+                                            candidate['fe_user_id']))
+
+        wiki_db_conn.commit()
+        logging.info('inserted {} first edits'.format(j))
+                    
+        logging.info('checking if articles survived')
 
         ## See if that article survived for 30 days
-        if fe_created_article:
-            ## Create a DB-compatible timestamp for the end of the horizon
-            end_timestamp = dt.datetime.strptime(
-                fe_timestamp, '%Y%m%d%H%M%S') + horizon_delta
-            end_timestamp = end_timestamp.strftime('%Y%m%d%H%M%S')
+        with db.cursor(wiki_db_conn, 'dict') as db_cursor:
+            db_cursor.execute(deletion_query)
+            for row in db_cursor:
+                candidate = candidates[row['fe_user_id']]
+                candidate['fe_article_survived'] = 0
 
-            fe_article_survived = 1
-            with db.cursor(wiki_db_conn, 'dict') as db_cursor:
-                db_cursor.execute(
-                    deletion_query,
-                    {'creation_timestamp': fe_timestamp,
-                     'expiry_timestamp': end_timestamp,
-                     'page_id': fe_page_id})
-                for row in db_cursor:
-                    fe_article_survived = 0
+        ## Go through the candidates and make datapoints of all those
+        ## that created an article
+        for user in candidates.values():
+            if 'fe_created_article' in user:
+                datapoints.append(DataPoint(user['fe_user_id'],
+                                            user['fe_created_article'],
+                                            user['fe_article_survived']))
 
-            datapoints.append(DataPoint(user_id, fe_created_article,
-                                        fe_article_survived))
+        logging.info('added users, now have {} data points'.format(
+            len(datapoints)))
+
+        ## Empty out the temp table in preparation for the next batch
+        with db.cursor(wiki_db_conn, 'dict') as db_cursor:
+            db_cursor.execute(temp_delete_query)
+        wiki_db_conn.commit()
+        
+        i += batch_size
 
     ## ok, done
     return(datapoints)
@@ -206,6 +281,16 @@ def gather_historic(local_db, wiki_db, start_date, end_date=None, step=7):
                       WHERE as_reg_timestamp >= %(start)s
                       AND as_reg_timestamp < %(end)s
                       AND as_num_edits_30 > 0'''
+
+    ## Query to create a temporary table where we can store the article creation
+    ## info we need
+    temp_table_query = '''CREATE TEMPORARY TABLE s53463__actrial_p.creations (
+                          page_id INT UNSIGNED NOT NULL PRIMARY KEY,
+                          rev_timestamp BINARY(14) NOT NULL,
+                          user_id INT UNSIGNED NOT NULL)'''
+
+    ## Query to drop the temp table
+    temp_drop_query = '''DROP TABLE s53463__actrial_p.creations'''
     
     cur_date = start_date
     delta_days = dt.timedelta(days=step)
@@ -214,7 +299,11 @@ def gather_historic(local_db, wiki_db, start_date, end_date=None, step=7):
 
     if not end_date:
         end_date = dt.date.today()
-    
+
+    ## Create the temporary table
+    with db.cursor(wiki_db, 'dict') as db_cursor:
+        db_cursor.execute(temp_table_query)
+        
     while cur_date < end_date:
         stop_date = cur_date + delta_days
         if stop_date > end_date:
@@ -235,6 +324,10 @@ def gather_historic(local_db, wiki_db, start_date, end_date=None, step=7):
 
         cur_date = stop_date
 
+    ## Drop the temporary table
+    with db.cursor(wiki_db, 'dict') as db_cursor:
+        db_cursor.execute(temp_drop_query)
+
     return(datapoints)
 
 def main():
@@ -248,8 +341,8 @@ def main():
                                '~/replica.my.cnf')
     
     datapoints = gather_historic(local_db_conn, db_conn,
-                                 dt.date(2016,12,27),
-                                 dt.date(2017,1,1))
+                                 dt.date(2016,4,14),
+                                 dt.date(2016,4,15))
     print('got {} data points'.format(len(datapoints)))
     # print(datapoints[0])
     print(datapoints)
