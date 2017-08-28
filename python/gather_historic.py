@@ -38,6 +38,7 @@ import autoconfirmed
 import survival
 import moves
 import patrollers
+import articlesurvival
 
 def insert_newaccounts(local_db, wiki_db, start_date, end_date):
     '''
@@ -628,9 +629,104 @@ def insert_patrollers(local_db, wiki_db, start_date, end_date):
     local_db_conn.close()
     return()
 
+def insert_articlesurvival(local_db, wiki_db, start_date, end_date):
+    '''
+    Gather data on whether a newly registered account created an article
+    in their first edit, and then whether that article survived for at
+    least 30 days.
+
+    :param local_db: Database connection to the local database where our
+                     summary data is to be put
+    :type local_db: MySQLdb.Connection
+
+    :param wiki_db: Database connection to the replicated Wikipedia database
+    :type wiki_db: MySQLdb.Connection
+
+    :param start_date: date at which to start gathering user IDs to process
+    :type end_date: datetime.date
+
+    :param end_date: date at which to stop gathering user IDs to process
+    :type end_date: datetime.dt
+    '''
+
+    update_query = '''UPDATE account_stats
+                      SET as_created_article=%s,
+                          as_article_survived=%s
+                      WHERE as_userid=%s'''
+
+    local_db_conn = db.connect(local_db['hostname'], local_db['dbname'],
+                               local_db['dbconf'])
+    if not local_db_conn:
+        logging.error('unable to connect to local database server {}'.format(local_db['hostname']))
+        return()
+
+    wiki_db_conn = db.connect(wiki_db['hostname'], wiki_db['dbname'],
+                              wiki_db['dbconf'])
+    if not wiki_db_conn:
+        logging.error('unable to connect to replicated database server {}'.format(wiki_db['hostname']))
+        return()
+    
+    ## Batch size for database commits
+    batch_size = 1000
+
+    ## Let's try to populate this a week at a time:
+    time_step = dt.timedelta(days=7)
+
+    ## If the end date is less than 30 days prior to today, set it
+    ## to 30 days prior to today. We don't want to gather statistics for
+    ## users who have not been around for 30 days yet, because if they
+    ## created an article, we won't know if it has survived.
+    if end_date > (dt.date.today() - dt.timedelta(days=30)):
+        end_date = dt.date.today() - dt.timedelta(days=30)
+    
+    cur_date = start_date
+    while cur_date < end_date:
+        stop_date = cur_date + time_step
+        if stop_date > end_date:
+            stop_date = end_date
+
+        datapoints = articlesurvival.gather_historic(local_db_conn,
+                                                     wiki_db_conn,
+                                                     cur_date, stop_date)
+
+        ## Because data gathering takes a long time, the database might drop
+        ## the connection. In that case, we reconnect
+        try:
+            with db.cursor(local_db_conn) as db_cursor:
+                db_cursor.execute("SELECT * FROM account_stats LIMIT 1")
+        except MySQLdb.OperationalError as e:
+            local_db_conn = db.connect(local_db['hostname'], local_db['dbname'],
+                                       local_db['dbconf'])
+            
+        with db.cursor(local_db_conn) as db_cursor:
+            i = 0
+            for datapoint in datapoints:
+                db_cursor.execute(update_query,
+                                  (datapoint.created_article,
+                                   datapoint.article_survived,
+                                   datapoint.userid))
+                i += 1
+                if i % batch_size == 0:
+                    logging.info('processed {} datapoints, comitting'.format(i))
+                    local_db_conn.commit()
+
+            ## Commit any outstanding inserts
+            logging.info('processed {} datapoints, final commit'.format(i))
+            local_db_conn.commit()
+
+        print('Completed inserting data from {} to {}'.format(cur_date,
+                                                              stop_date))
+        cur_date += time_step
+
+    wiki_db_conn.close()
+    local_db_conn.close()
+        
+    return()
+
 def insert_historic(start_date, end_date, run_everything, run_newaccounts,
                     run_registrations, run_first30, run_autoconfirmed,
-                    run_survival, run_moves, run_patrollers):
+                    run_survival, run_moves, run_patrollers,
+                    run_article_survival):
     '''
     Gather historic data for the various statistics we are interested in
     and populate our database tables. Supplied start and end dates can be
@@ -666,6 +762,10 @@ def insert_historic(start_date, end_date, run_everything, run_newaccounts,
 
     :param run_patrollers: insert counts of patroller actions?
     :type run_patrollers: bool
+
+    :param run_article_survival: update status on whether a user created an
+                                 article in their first edit, and if it survived?
+    :type run_article_survival: bool
     '''
 
     db_conf = '~/replica.my.cnf'
@@ -703,6 +803,10 @@ def insert_historic(start_date, end_date, run_everything, run_newaccounts,
     if run_everything or run_patrollers:
         logging.info("Gathering counts of patrol actions done by patrollers")
         insert_patrollers(local_db, wiki_db, start_date, end_date)
+
+    if run_everything or run_article_survival:
+        logging.info("Gathering counts of patrol actions done by patrollers")
+        insert_articlesurvival(local_db, wiki_db, start_date, end_date)
         
     return()
 
@@ -727,7 +831,7 @@ def main():
                             help='insert/update everything')
 
     cli_parser.add_argument('--newaccounts', action='store_true',
-                            help='insert counts of the number of registered accounts')
+                            help='insert counts of the number of registered accouvnts')
 
     cli_parser.add_argument('--registrations', action='store_true',
                             help='insert account registration data')
@@ -747,6 +851,9 @@ def main():
     cli_parser.add_argument('--patrollers', action='store_true',
                             help='insert counts of the number of patrol actions per active patroller')
 
+    cli_parser.add_argument('--article_survival', action='store_true',
+                            help='update info on whether a new account started out by creating a new article, and if so, whether the article survived')
+    
     cli_parser.add_argument('start_date', type=valid_date,
                             help='start date for gathering data (format: YYYY-MM-DD)')
 
@@ -760,7 +867,8 @@ def main():
 
     insert_historic(args.start_date, args.end_date, args.all, args.newaccounts,
                     args.registrations, args.first30, args.autoconfirmed,
-                    args.survival, args.moves, args.patrollers)
+                    args.survival, args.moves, args.patrollers,
+                    args.article_survival)
         
     return()
 

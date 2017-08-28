@@ -8,7 +8,7 @@
 -- the main namespace from other namespaces.
 
 USE wmf;
-SELECT event_timestamp, revision_id, event_user_id
+SELECT event_timestamp, revision_id
 FROM mediawiki_history
 WHERE wiki_db = 'enwiki'
   AND event_entity = 'revision'
@@ -27,4 +27,4 @@ WHERE wiki_db = 'enwiki'
            AND event_comment NOT REGEXP '\\{\\{R from '
            AND event_comment NOT REGEXP '.*moved .*\\[\\[([^\]]+)\\]\\] to \\[\\[([^\]]+)\\]\\].*'))
   AND TO_DATE(event_timestamp) >= '2009-01-01'
-  AND snapshot = '2017-07';
+  AND snapshot = '2017-07_private';
