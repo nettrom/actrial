@@ -1,0 +1,5 @@
+PATH=/usr/local/bin:/usr/bin:/bin
+
+# Crontab entries for ACTRIAL
+
+0 */6 * * * qsub $HOME/projects/actrial/bin/npp_queue_snapshot.sh

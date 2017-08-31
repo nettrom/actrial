@@ -1,7 +1,7 @@
 ## Investigation of patroller activity
 
 library(ggplot);
-library(data.frame);
+library(data.table);
 library(reldist);
 
 ## Load in the datasets
@@ -20,7 +20,7 @@ patroller_gini = patroller_distribution[, list(pat_gini=gini(pat_num_actions)),
 
 ## Also the 75th percentile
 patroller_75th = patroller_distribution[
-  ,list(pat_75th=as.numeric(quantile(pat_num_actions, probs=c(0.75)))),
+  , list(pat_75th=as.numeric(quantile(pat_num_actions, probs=c(0.75)))),
   by=log_date];
 
 ## Problem with the 75th percentile is that it can stay constant as the size
@@ -37,9 +37,10 @@ top_quantile_reviews(patroller_distribution[log_date == '2017-01-01']$pat_num_ac
 
 top_patrollers = patroller_distribution[
   ,list(total_actions=sum(pat_num_actions),
+        top10_actions=top_quantile_reviews(pat_num_actions, prob=0.10),
         top25_actions=top_quantile_reviews(pat_num_actions)),
   by=log_date
-]
+  ];
 
 ## H9: Number of patrol actions
 ggplot(patrolactions, aes(x=log_date, y=num_patrol_actions)) + geom_line() +
@@ -71,14 +72,14 @@ ggplot(patrolactions_related[c_date >= as.IDate('2016-01-01')],
 ggplot(patrollers, aes(x=log_date, y=num_patrollers)) + geom_line() +
   ggtitle('Active patrollers per day') +
   xlab('Year') + ylab('Number of active patrollers') +
-  scale_y_continuous(expand = c(0, 0), limits = c(0, 70)) +
+  scale_y_continuous(expand = c(0, 0), limits=c(0, 175)) +
   scale_x_date(date_breaks='1 years', date_labels = '%Y');
 
 ## Let's add a smoothed line to the plot:
 ggplot(patrollers, aes(x=log_date, y=num_patrollers)) + geom_line() +
   ggtitle('Active patrollers per day') +
   xlab('Year') + ylab('Number of active patrollers') +
-  scale_y_continuous(expand = c(0, 0), limits = c(0, 70)) +
+  scale_y_continuous(expand = c(0, 0)) +
   scale_x_date(date_breaks='1 years', date_labels = '%Y') +
   geom_smooth(method='loess', span=0.1);
 
@@ -103,7 +104,7 @@ ggplot(creations_and_moves[, list(n_articles=sum(n_articles)), by=c_date],
   ggtitle('Number of articles created per day (including moves into main)') +
   geom_smooth(method='loess', span=0.1) +
   scale_x_date(date_breaks='1 years', date_labels = '%Y') +
-  scale_y_continuous(expand = c(0, 0), limits = c(0, 2750)) +
+  scale_y_continuous(expand = c(0, 0)) +
   xlab('Date') + ylab('Number of articles')
 
 ## Patroller distribution as measured by the Gini coefficient
@@ -123,6 +124,14 @@ ggplot(patroller_75th, aes(x=log_date, y=pat_75th)) + geom_line() +
 ggplot(top_patrollers[, list(log_date, prop_top=100*top25_actions/total_actions)],
        aes(x=log_date, y=prop_top)) + geom_line() +
   ggtitle('Proportion of total patrol actions done by most active quartile') +
+  scale_x_date(date_breaks='1 years', date_labels = '%Y') +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 100), breaks=seq(0,100,10)) +
+  xlab('Date') + ylab('Proportion in percent');
+
+## Top 10%?
+ggplot(top_patrollers[, list(log_date, prop_top=100*top10_actions/total_actions)],
+       aes(x=log_date, y=prop_top)) + geom_line() +
+  ggtitle('Proportion of total patrol actions done by 90th percentile') +
   scale_x_date(date_breaks='1 years', date_labels = '%Y') +
   scale_y_continuous(expand = c(0, 0), limits = c(0, 100), breaks=seq(0,100,10)) +
   xlab('Date') + ylab('Proportion in percent');

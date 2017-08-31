@@ -111,11 +111,6 @@ def gather_data(wiki_db_conn, local_db_conn, user_ids, horizon=30):
                          )) AS user_activity
                          ORDER BY rev_timestamp ASC LIMIT 1'''
 
-    ## Query to see if that edit is found in the article creation database
-    ##creation_query = '''SELECT *
-    ##                    FROM articlecreations
-    ##                    WHERE ac_rev_id = %(rev_id)s'''
-
     ## More efficient query is to look up a whole bunch of them at the same
     ## time:
     creation_query = '''SELECT *
@@ -129,16 +124,6 @@ def gather_data(wiki_db_conn, local_db_conn, user_ids, horizon=30):
 
     ## Query to empty the temp table
     temp_delete_query = '''DELETE FROM s53463__actrial_p.creations'''
-
-    ## Query to find if a given article was deleted within thirty days
-    ## after creation
-    deletion_query = '''SELECT *
-                        FROM logging
-                        WHERE log_type='delete'
-                        AND log_action='delete'
-                        AND log_timestamp > %(creation_timestamp)s
-                        AND log_timestamp < %(expiry_timestamp)s
-                        AND log_page = %(page_id)s'''
 
     ## Query to find if a group of articles were deleted within thirty
     ## days of their creation
