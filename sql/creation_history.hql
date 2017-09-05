@@ -18,8 +18,9 @@ WHERE wiki_db = 'enwiki'
        OR
        (page_namespace IS NULL
         AND page_namespace_latest = 0
-        AND revision_parent_id IS NULL
-        AND page_revision_count = 1))
+        AND (revision_parent_id IS NULL
+             OR revision_parent_id = 0)))
+  AND page_revision_count = 1
   AND (event_comment IS NULL
        OR (event_comment IS NOT NULL
            AND LCASE(event_comment) NOT REGEXP 'redir'
