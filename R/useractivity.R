@@ -10,7 +10,7 @@ cbbPalette <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2"
 ## 30-day activity data for users after that.
 
 ## Read in the activity dataset
-useractivity = data.table(read.table("datasets/activity_stats_20170816.tsv.bz2",
+useractivity = data.table(read.table("datasets/activity_stats_20170831.tsv.bz2",
                           sep='\t', stringsAsFactors=FALSE, header=TRUE));
 
 ## When we're looking at data by the type of account creation, we are
@@ -80,6 +80,17 @@ ggplot(prop_nonzero_30[as_create_type == 'autocreate',
   xlab('Year') +
   ylab('Proportion in %') +
   ggtitle('Proportion of autocreated accounts with non-zero edits');
+
+## Based on the trends in number of autocreated accounts and the proportion
+## of accounts making edits, is the number of accounts making edits fairly stable?
+ggplot(prop_nonzero_30[as_create_type == 'autocreate'],
+       aes(x=as_reg_date, y=n_editors)) + geom_line() +
+  scale_x_date(date_breaks='1 years', date_labels = '%Y') +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 500)) +
+  xlab('Year') +
+  ylab('Number of editors') +
+  ggtitle('Autocreated accounts making edits in the first 30 days') +
+  geom_smooth(method='loess', span=0.25);
 
 ## Proportion of users by date and type that reach autoconfirmed status in 30 days,
 ## also measuring number of editors because that's perhaps more interesting.

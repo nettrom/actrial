@@ -815,7 +815,7 @@ def main():
 
     def valid_date(d):
         try:
-            return dt.datetime.strptime(d, "%Y-%m-%d").date()
+            return(dt.datetime.strptime(d, "%Y-%m-%d").date())
         except ValueError:
             raise argparse.ArgumentTypeError("Please write dates in the preferred format (YYYY-MM-DD)")
     
