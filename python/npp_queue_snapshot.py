@@ -58,41 +58,34 @@ def capture_snapshot():
 
     insert_query = '''INSERT INTO npp_queue_size VALUES (%s, %s)'''
 
+    insert_snapshot_query = '''INSERT INTO {db_name}.{table_name}
+                        SELECT UTC_TIMESTAMP() AS npp_timestamp,
+                        COUNT(ptrp_page_id) AS npp_count
+                        FROM pagetriage_page
+                        JOIN page
+                        ON page_id = ptrp_page_id
+                        WHERE ptrp_reviewed = 0
+                        AND page_is_redirect = 0
+                        AND page_namespace = 0'''
+    
     db_conf = '~/replica.my.cnf'
-    local_db = {'hostname': 'tools.labsdb',
-                'dbname': 's53463__actrial_p',
-                'dbconf': db_conf}
+    actrial_db_name = 's53463__actrial_p'
+    actrial_table_name = 'npp_queue_size'
+    
     wiki_db = {'hostname': 'enwiki.labsdb',
                'dbname': 'enwiki_p',
                'dbconf': db_conf}
     
-    local_db_conn = db.connect(local_db['hostname'], local_db['dbname'],
-                               local_db['dbconf'])
-    if not local_db_conn:
-        logging.error('unable to connect to local database server {}'.format(local_db['hostname']))
-        return()
-
     wiki_db_conn = db.connect(wiki_db['hostname'], wiki_db['dbname'],
                               wiki_db['dbconf'])
     if not wiki_db_conn:
         logging.error('unable to connect to replicated database server {}'.format(wiki_db['hostname']))
         return()
     
-    snapshot_timestamp = None
-    snapshot_count = None
-
     with db.cursor(wiki_db_conn, 'dict') as db_cursor:
-        db_cursor.execute(snapshot_query)
-
-
-        for row in db_cursor:
-            snapshot_timestamp = row['npp_timestamp']
-            snapshot_count = row['npp_count']
-
-    with db.cursor(local_db_conn, 'dict') as db_cursor:
-        db_cursor.execute(insert_query,
-                          (snapshot_timestamp, snapshot_count))
-        local_db_conn.commit()
+        db_cursor.execute(insert_snapshot_query.format(
+            db_name=actrial_db_name, table_name=actrial_table_name))
+        wiki_db_conn.commit()
         
     # ok, done
     return()
