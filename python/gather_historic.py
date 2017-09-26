@@ -778,7 +778,7 @@ def insert_historic(start_date, end_date, run_everything, run_newaccounts,
 
     if run_everything or run_newaccounts:
         logging.info("Gathering counts of number of account registrations")
-        insert_newaccounts(local_db, wiki_db)
+        insert_newaccounts(local_db, wiki_db, start_date, end_date)
 
     if run_everything or run_registrations:
         logging.info("Gathering registration info on new accounts to add to the data table")
