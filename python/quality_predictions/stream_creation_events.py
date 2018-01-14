@@ -111,7 +111,9 @@ class PageCreationStreamer:
         page_check_query = '''SELECT ap.page_is_redirect,
                                      IFNULL(c1.cl_from, 0) AS page_is_disambig,
                                      IFNULL(c2.cl_from, 0) AS page_is_list
-                              FROM page ap
+                              FROM revision r
+                              JOIN page ap
+                              ON r.rev_page=ap.page_id
                               LEFT JOIN page tp
                               ON (ap.page_title=tp.page_title
                                   AND tp.page_namespace=1)
@@ -125,8 +127,7 @@ class PageCreationStreamer:
                                 WHERE cl_to REGEXP "^List-Class.*")
                                 AS c2
                               ON c2.cl_from=tp.page_id
-                              WHERE ap.page_namespace=0
-                              AND ap.page_title=%(page_title)s
+                              WHERE r.rev_id=%(rev_id)s
                               LIMIT 1'''
 
         ## SQL query to insert predictions for a given revision into
@@ -190,7 +191,8 @@ class PageCreationStreamer:
             with db.cursor(wiki_db_conn, 'dict') as db_cursor:
                 db_cursor.execute(
                     page_check_query,
-                    {'page_title': data['title'].replace(" ", "_").encode('utf-8')})
+                    {'rev_id': data['revision']['new']})
+
                 for row in db_cursor:
                     page_is_redirect = row['page_is_redirect']
                     page_is_disambig = row['page_is_disambig']
