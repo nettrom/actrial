@@ -39,6 +39,7 @@ import survival
 import moves
 import patrollers
 import articlesurvival
+import deletionreasons
 
 def insert_newaccounts(local_db, wiki_db, start_date, end_date):
     '''
@@ -57,6 +58,14 @@ def insert_newaccounts(local_db, wiki_db, start_date, end_date):
                       (na_date, na_newusers, na_autocreate, na_byemail,
                        na_create, na_create2)
                       VALUES (%s, %s, %s, %s, %s, %s)'''
+
+    ## Early dates use na_newusers, but it's a sum of all other types,
+    ## so we update the dataset afterwards so newer dates also has this
+    ## column populated.
+    update_query = '''UPDATE newaccounts
+                      SET na_newusers = na_autocreate + na_byemail +
+                                        na_create + na_create2
+                      WHERE na_newusers = 0'''
 
     local_db_conn = db.connect(local_db['hostname'], local_db['dbname'],
                                local_db['dbconf'])
@@ -112,6 +121,11 @@ def insert_newaccounts(local_db, wiki_db, start_date, end_date):
             
         cur_date += one_year_ish
 
+    ## Update `na_newusers` to be the sum of the other columns
+    with db.cursor(local_db_conn) as db_cursor:
+        db_cursor.execute(update_query)
+        local_db_conn.commit()
+        
     local_db_conn.close()
     wiki_db_conn.close()
 
@@ -258,7 +272,12 @@ def insert_first30(local_db, wiki_db, start_date, end_date):
     ## to 30 days prior to today. We don't want to gather statistics for
     ## users who have not had 30 days of activity yet.
     if end_date > (dt.date.today() - dt.timedelta(days=30)):
+        ## Calculate the interval between start and end date so we
+        ## can correctly move both.
+        interval = end_date - start_date
+        
         end_date = dt.date.today() - dt.timedelta(days=30)
+        start_date = end_date - interval
     
     cur_date = start_date
     while cur_date < end_date:
@@ -348,7 +367,12 @@ def insert_autoconfirmed(local_db, wiki_db, start_date, end_date):
     ## to 30 days prior to today. We don't want to gather statistics for
     ## users who have not had 30 days of activity yet.
     if end_date > (dt.date.today() - dt.timedelta(days=30)):
+        ## Calculate the interval between start and end date so we
+        ## can correctly move both.
+        interval = end_date - start_date
+        
         end_date = dt.date.today() - dt.timedelta(days=30)
+        start_date = end_date - interval
     
     ## Let's try to populate this a week at a time (if we do longer,
     ## the replicated database is likely to time out on us)
@@ -434,7 +458,12 @@ def insert_survival(local_db, wiki_db, start_date, end_date):
     ## to five weeks prior to today. We don't want to gather statistics for
     ## users who have not completed the fifth week of activity yet.
     if end_date > (dt.date.today() - dt.timedelta(days=35)):
+        ## Calculate the interval between start and end date so we
+        ## can correctly move both.
+        interval = end_date - start_date
+
         end_date = dt.date.today() - dt.timedelta(days=35)
+        start_date = end_date - interval
     
     cur_date = start_date
     while cur_date < end_date:
@@ -671,14 +700,19 @@ def insert_articlesurvival(local_db, wiki_db, start_date, end_date):
 
     ## Let's try to populate this a week at a time:
     time_step = dt.timedelta(days=7)
-
+   
     ## If the end date is less than 30 days prior to today, set it
     ## to 30 days prior to today. We don't want to gather statistics for
     ## users who have not been around for 30 days yet, because if they
     ## created an article, we won't know if it has survived.
     if end_date > (dt.date.today() - dt.timedelta(days=30)):
+        ## Calculate the interval between start and end date so we
+        ## can correctly move both.
+        interval = end_date - start_date
+        
         end_date = dt.date.today() - dt.timedelta(days=30)
-    
+        start_date = end_date - interval
+
     cur_date = start_date
     while cur_date < end_date:
         stop_date = cur_date + time_step
@@ -723,10 +757,120 @@ def insert_articlesurvival(local_db, wiki_db, start_date, end_date):
         
     return()
 
+def insert_deletionreasons(local_db, wiki_db, start_date, end_date):
+    '''
+    Gather data on deletion reasons for deletions in Main (ns=0),
+    User (ns=2), and Draft (ns=118) and insert that into the database.
+
+    :param local_db: Database connection to the local database where our
+                     summary data is to be put
+    :type local_db: MySQLdb.Connection
+
+    :param wiki_db: Database connection to the replicated Wikipedia database
+    :type wiki_db: MySQLdb.Connection
+
+    :param start_date: date at which to start gathering deletion data
+    :type end_date: datetime.date
+
+    :param end_date: date at which to stop gathering deletion data
+    :type end_date: datetime.dt
+    '''
+
+    ## First two values are the date and namespace,
+    ## the next row are the general reasons (G1-G13),
+    ## then the article reasons (A1-A11, with some missing)
+    ## then the user reasons (U1-U5, but no U4),
+    ## lastly PROD, AFD, and "other"
+    insert_query = '''INSERT INTO deletion_reasons
+                      VALUES (%s, %s,
+                      %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                      %s, %s, %s, %s, %s, %s, %s, %s,
+                      %s, %s, %s, %s,
+                      %s, %s, %s)'''
+    
+
+    local_db_conn = db.connect(local_db['hostname'], local_db['dbname'],
+                               local_db['dbconf'])
+    if not local_db_conn:
+        logging.error('unable to connect to local database server {}'.format(local_db['hostname']))
+        return()
+
+    wiki_db_conn = db.connect(wiki_db['hostname'], wiki_db['dbname'],
+                              wiki_db['dbconf'])
+    if not wiki_db_conn:
+        logging.error('unable to connect to replicated database server {}'.format(wiki_db['hostname']))
+        return()
+    
+    ## Let's try to populate this a week at a time:
+    time_step = dt.timedelta(days=7)
+   
+    cur_date = start_date
+    while cur_date < end_date:
+        stop_date = cur_date + time_step
+        if stop_date > end_date:
+            stop_date = end_date
+
+        datapoints = deletionreasons.gather_historic(wiki_db_conn,
+                                                     cur_date, stop_date)
+
+        ## Because data gathering might take a bit, the local DB might drop
+        ## the connection. In that case, we reconnect
+        try:
+            with db.cursor(local_db_conn) as db_cursor:
+                db_cursor.execute("SELECT * FROM account_stats LIMIT 1")
+        except MySQLdb.OperationalError as e:
+            local_db_conn = db.connect(local_db['hostname'], local_db['dbname'],
+                                       local_db['dbconf'])
+            
+        with db.cursor(local_db_conn) as db_cursor:
+            for datapoint in datapoints:
+                db_cursor.execute(insert_query,
+                                  (datapoint.dr_date, datapoint.dr_namespace,
+                                   datapoint.stats['G1'],
+                                   datapoint.stats['G2'],
+                                   datapoint.stats['G3'],
+                                   datapoint.stats['G4'],
+                                   datapoint.stats['G5'],
+                                   datapoint.stats['G6'],
+                                   datapoint.stats['G7'],
+                                   datapoint.stats['G8'],
+                                   datapoint.stats['G9'],
+                                   datapoint.stats['G10'],
+                                   datapoint.stats['G11'],
+                                   datapoint.stats['G12'],
+                                   datapoint.stats['G13'],
+                                   datapoint.stats['A1'],
+                                   datapoint.stats['A2'],
+                                   datapoint.stats['A3'],
+                                   datapoint.stats['A5'],
+                                   datapoint.stats['A7'],
+                                   datapoint.stats['A9'],
+                                   datapoint.stats['A10'],
+                                   datapoint.stats['A11'],
+                                   datapoint.stats['U1'],
+                                   datapoint.stats['U2'],
+                                   datapoint.stats['U3'],
+                                   datapoint.stats['U5'],
+                                   datapoint.stats['PROD'],
+                                   datapoint.stats['AFD'],
+                                   datapoint.stats['other']))
+
+                logging.info('processed {} datapoints, comitting'.format(len(datapoints)))
+                local_db_conn.commit()
+
+        print('Completed inserting data from {} to {}'.format(cur_date,
+                                                              stop_date))
+        cur_date += time_step
+
+    wiki_db_conn.close()
+    local_db_conn.close()
+        
+    return()
+
 def insert_historic(start_date, end_date, run_everything, run_newaccounts,
                     run_registrations, run_first30, run_autoconfirmed,
                     run_survival, run_moves, run_patrollers,
-                    run_article_survival):
+                    run_article_survival, run_deletion_reasons):
     '''
     Gather historic data for the various statistics we are interested in
     and populate our database tables. Supplied start and end dates can be
@@ -766,13 +910,16 @@ def insert_historic(start_date, end_date, run_everything, run_newaccounts,
     :param run_article_survival: update status on whether a user created an
                                  article in their first edit, and if it survived?
     :type run_article_survival: bool
+
+    :param run_deletion_reasons: insert data on deletion reasons?
+    :type run_deletion_reasons: bool
     '''
 
     db_conf = '~/replica.my.cnf'
     local_db = {'hostname': 'tools.labsdb',
                 'dbname': 's53463__actrial_p',
                 'dbconf': db_conf}
-    wiki_db = {'hostname': 'enwiki.labsdb',
+    wiki_db = {'hostname': 'enwiki.analytics.db.svc.eqiad.wmflabs',
                'dbname': 'enwiki_p',
                'dbconf': db_conf}
 
@@ -805,8 +952,12 @@ def insert_historic(start_date, end_date, run_everything, run_newaccounts,
         insert_patrollers(local_db, wiki_db, start_date, end_date)
 
     if run_everything or run_article_survival:
-        logging.info("Gathering counts of patrol actions done by patrollers")
+        logging.info("Gathering data on article survival")
         insert_articlesurvival(local_db, wiki_db, start_date, end_date)
+                             
+    if run_everything or run_deletion_reasons:
+        logging.info("Gathering data on deletion reasons")
+        insert_deletionreasons(local_db, wiki_db, start_date, end_date)
         
     return()
 
@@ -853,6 +1004,9 @@ def main():
 
     cli_parser.add_argument('--article_survival', action='store_true',
                             help='update info on whether a new account started out by creating a new article, and if so, whether the article survived')
+
+    cli_parser.add_argument('--deletion_reasons', action='store_true',
+                            help='insert counts of deletion reasons for Main, User, and Draft namespaces')
     
     cli_parser.add_argument('start_date', type=valid_date,
                             help='start date for gathering data (format: YYYY-MM-DD)')
@@ -868,7 +1022,7 @@ def main():
     insert_historic(args.start_date, args.end_date, args.all, args.newaccounts,
                     args.registrations, args.first30, args.autoconfirmed,
                     args.survival, args.moves, args.patrollers,
-                    args.article_survival)
+                    args.article_survival, args.deletion_reasons)
         
     return()
 
