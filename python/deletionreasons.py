@@ -109,6 +109,15 @@ def gather_data(db_conn, start_timestamp, end_timestamp):
     csd_re = re.compile('\[\[(WP|Wikipedia):(CSD|Criteria for speedy deletion)#((?:[AGURX])\d+)|\[\[(WP|Wikipedia):((?:[AGURX])\d+)(\||\]\])')
     prod_re = re.compile('\[\[WP:(BLP)?PROD')
     afd_re = re.compile('\[\[(Wikipedia|WP):Articles for deletion/')
+
+    ## Mass deletion of pages, which generally fits into G5, see discussion on
+    ## https://meta.wikimedia.org/wiki/Research_talk:Autoconfirmed_article_creation_trial#Effects_on_page_deletion
+    nuke_re = re.compile('mass deletion of pages', re.I)
+
+    ## The word "redirect" is unlikely to be used unless an actual redirect is
+    ## being deleted. We'll use it for additional filtering of "other",
+    ## to ensure that PROD/AfDs don't refer to redirects.
+    redirect_re = re.compile('redirect', re.I)
     
     with db.cursor(db_conn, 'dict') as db_cursor:
         db_cursor.execute(deletions_query.format(start=start_timestamp,
@@ -133,19 +142,25 @@ def gather_data(db_conn, start_timestamp, end_timestamp):
 
             datapoint = data_map[log_date][log_namespace]
             csd_match = csd_re.search(log_comment)
+
+            is_nuke = nuke_re.search(log_comment)
+            is_redirect = redirect_re.search(log_comment)
             
             if csd_match:
                 reason = csd_match.group(3) or csd_match.group(5)
                 if reason in datapoint.stats:
                     datapoint.stats[reason] += 1
+                elif is_nuke:
+                    datapoint.stats['G5'] += 1
+                elif not is_redirect:
+                    datapoint.stats['other'] += 1
+            elif not is_redirect:
+                if prod_re.search(log_comment):
+                    datapoint.stats['PROD'] += 1
+                elif afd_re.search(log_comment):
+                    datapoint.stats['AFD'] += 1
                 else:
                     datapoint.stats['other'] += 1
-            elif prod_re.search(log_comment):
-                datapoint.stats['PROD'] += 1
-            elif afd_re.search(log_comment):
-                datapoint.stats['AFD'] += 1
-            else:
-                datapoint.stats['other'] += 1
 
     for date in data_map.keys():
         for namespace in data_map[date].keys():
