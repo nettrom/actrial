@@ -115,8 +115,8 @@ def gather_data(db_conn, start_timestamp, end_timestamp):
     nuke_re = re.compile('mass deletion of pages', re.I)
 
     ## The word "redirect" is unlikely to be used unless an actual redirect is
-    ## being deleted. We'll use it for additional filtering of "other",
-    ## to ensure that PROD/AfDs don't refer to redirects.
+    ## being deleted. We'll use it for ensuring that PROD, AfD, and "other"
+    ## isn't referring to redirects.
     redirect_re = re.compile('redirect', re.I)
     
     with db.cursor(db_conn, 'dict') as db_cursor:
@@ -150,8 +150,6 @@ def gather_data(db_conn, start_timestamp, end_timestamp):
                 reason = csd_match.group(3) or csd_match.group(5)
                 if reason in datapoint.stats:
                     datapoint.stats[reason] += 1
-                elif is_nuke:
-                    datapoint.stats['G5'] += 1
                 elif not is_redirect:
                     datapoint.stats['other'] += 1
             elif not is_redirect:
@@ -159,6 +157,8 @@ def gather_data(db_conn, start_timestamp, end_timestamp):
                     datapoint.stats['PROD'] += 1
                 elif afd_re.search(log_comment):
                     datapoint.stats['AFD'] += 1
+                elif is_nuke:
+                    datapoint.stats['G5'] += 1
                 else:
                     datapoint.stats['other'] += 1
 
