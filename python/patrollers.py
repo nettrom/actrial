@@ -54,8 +54,8 @@ def gather_data(db_conn, start_timestamp, end_timestamp):
     :type end_timestamp: str
     '''
 
-    activity_query = '''SELECT log_date, log_user,
-                               num_raw_logged - num_duplicates AS num_actions
+    activity_query = '''SELECT log_date, log_user, num_raw_logged -
+                        IFNULL(num_duplicates, 0) AS num_actions
                         FROM (SELECT DATE(log_timestamp) AS log_date, log_user,
                               COUNT(*) AS num_raw_logged
                               FROM logging_logindex
@@ -68,7 +68,7 @@ def gather_data(db_conn, start_timestamp, end_timestamp):
                                    (log_type="pagetriage-curation"
                                     AND log_action="reviewed"))
                               GROUP BY log_date, log_user) AS all_events
-                        JOIN
+                        LEFT JOIN
                              (SELECT DATE(log_timestamp) AS log_date,
                                      l1.log_user,
                                      COUNT(*) AS num_duplicates

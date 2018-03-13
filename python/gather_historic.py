@@ -780,12 +780,14 @@ def insert_deletionreasons(local_db, wiki_db, start_date, end_date):
     ## the next row are the general reasons (G1-G13),
     ## then the article reasons (A1-A11, with some missing)
     ## then the user reasons (U1-U5, but no U4),
-    ## lastly PROD, AFD, and "other"
+    ## PROD, AFD, and "other",
+    ## lastly R2, R3, and X1 (our redirect reasons).
     insert_query = '''INSERT INTO deletion_reasons
                       VALUES (%s, %s,
                       %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                       %s, %s, %s, %s, %s, %s, %s, %s,
                       %s, %s, %s, %s,
+                      %s, %s, %s,
                       %s, %s, %s)'''
     
 
@@ -853,7 +855,10 @@ def insert_deletionreasons(local_db, wiki_db, start_date, end_date):
                                    datapoint.stats['U5'],
                                    datapoint.stats['PROD'],
                                    datapoint.stats['AFD'],
-                                   datapoint.stats['other']))
+                                   datapoint.stats['other'],
+                                   datapoint.stats['R2'],
+                                   datapoint.stats['R3'],
+                                   datapoint.stats['X1']))
 
                 logging.info('processed {} datapoints, comitting'.format(len(datapoints)))
                 local_db_conn.commit()

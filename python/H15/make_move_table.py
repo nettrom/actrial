@@ -1,10 +1,10 @@
 #!/usr/env/python
 # -*- coding: utf-8 -*-
 '''
-Script to gather historical information about the number of articles that
-get created by moves from drafts.
+Script to gather the page ID, time of move, and source namespace
+for moves into the Main namespace.
 
-Copyright (c) 2017 Morten Wang
+Copyright (c) 2017-2018 Wikimedia Foundation
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -38,10 +38,10 @@ import requests
 class WPAPIError(Exception):
     pass
 
-## Named tuple for a data point with the number of moves that happened
-## at a specific date.
+## A data point is in this case a page move. We capture the page ID,
+## the timestamp of the revision that moved it, and the source namespace.
 DataPoint = namedtuple('DataPoint',
-                       ['date', 'num_moves_user', 'num_moves_draft'])
+                       ['page_id', 'timestamp', 'source_ns'])
 
 def get_namespaces():
     '''
@@ -79,10 +79,9 @@ def get_namespaces():
 
 def gather_data(db_conn, move_date, namespaces=None):
     '''
-    Gather data on the number of articles created by moves from User
-    and Draft/Wikipedia talk for the given date. Returns a data point with
-    the number of moves from the user namespace, and from the draft namespace
-    (or Wikipedia talk namespace, beceause that was used before Draft).
+    Gather data on the moves from User and Draft/Wikipedia talk into Main
+    for the given date. Returns a list of `DataPoint` named tuples, each
+    containing data about a specific page move.
 
     :param db_conn: Database connection to use for queries
     :type db_conn: MySQLdb.Connection
@@ -99,15 +98,17 @@ def gather_data(db_conn, move_date, namespaces=None):
     ## Note the usage of DISTINCT because a move creates two revisions with
     ## identical comments, one for each source/destination pair of pages.
     move_query = '''
-    SELECT DISTINCT(rev_comment)
+    SELECT DISTINCT rev_page, rev_timestamp, rev_comment
     FROM (
-      (SELECT rev_comment
+      (SELECT rev_page, rev_timestamp, rev_comment
        FROM revision
        WHERE rev_timestamp >= %(start_timestamp)s
        AND rev_timestamp < %(end_timestamp)s
        AND rev_comment REGEXP ".*moved .*\\\\[\\\\[((User|Draft|Wikipedia talk):[^\\\\]]+)\\\\]\\\\] to \\\\[\\\\[([^\\\\]]+)\\\\]\\\\].*")
       UNION
-      (SELECT ar_comment AS rev_comment
+      (SELECT ar_page_id AS rev_page,
+              ar_timestamp AS rev_timestamp,
+              ar_comment AS rev_comment
        FROM archive
        WHERE ar_timestamp >= %(start_timestamp)s
        AND ar_timestamp < %(end_timestamp)s
@@ -119,9 +120,9 @@ def gather_data(db_conn, move_date, namespaces=None):
     ## we are interested in.
     move_comment_re = re.compile(".*moved .*\\[\\[((User|Draft|Wikipedia talk):[^\]]+)\\]\\] to \\[\\[([^\]]+)\\]\\]", re.U)
 
-    num_moves_user = 0
-    num_moves_draft = 0
-
+    ## The moves we identified on this given date
+    moves = []
+    
     ## Create timestamps at midnight on the given day,
     ## and midnight the next day
     start_timestamp = dt.datetime.combine(move_date, dt.time(0, 0, 0))
@@ -145,14 +146,28 @@ def gather_data(db_conn, move_date, namespaces=None):
         for row in db_cursor:
             try:
                 rev_comment = row['rev_comment'].decode('utf-8')
+                rev_timestamp = row['rev_timestamp'].decode('utf-8')
+                rev_timestamp = dt.datetime.strptime(rev_timestamp,
+                                                     '%Y%m%d%H%M%S')
             except UnicodeDecodeError:
-                logging.warning('unable to decode rev_comment, unicode error?')
+                logging.warning('unable to decode rev_comment or timestamp, unicode error?')
                 continue
-                
+            except ValueError:
+                logging.warning('unable to parse rev_timestamp {}'.format(row['rev_timestamp']))
+                continue
+
+            ## Round robin page swaps recommends using subpages of Draft:Move
+            ## as temporary storage. This skews our results. Skip revisions
+            ## referencing "Draft:Move/", "pageswap", or mentions "round-robin",
+            ## indicating that type of move.
+            if re.search('pageswap|(draft:move/)|(round[- ]robin)',
+                         rev_comment, re.I):
+                continue
+            
             match = move_comment_re.match(rev_comment)
             if not match:
                 continue
-            
+
             source_ns = match.group(2)
             target = match.group(3)
 
@@ -163,11 +178,17 @@ def gather_data(db_conn, move_date, namespaces=None):
                     continue
 
             if source_ns == 'User':
-                num_moves_user += 1
-            else:
-                num_moves_draft += 1
+                source_ns = 2
+            elif source_ns == 'Wikipedia talk':
+                source_ns = 5
+            else: # Draft, because our regex filters to three namespaces
+                source_ns = 118
 
-    return(DataPoint(move_date, num_moves_user, num_moves_draft))
+            moves.append(DataPoint(row['rev_page'],
+                                   rev_timestamp,
+                                   source_ns))
+
+    return(moves)
 
 def gather_historic(db_conn, start_date, end_date=None, namespaces=None):
     '''
@@ -201,7 +222,7 @@ def gather_historic(db_conn, start_date, end_date=None, namespaces=None):
         logging.info('gathering data for {}'.format(cur_date))
 
         try:
-            datapoints.append(gather_data(db_conn, cur_date, namespaces))
+            datapoints.extend(gather_data(db_conn, cur_date, namespaces))
         except WPAPIError:
             return(datapoints)
 
@@ -209,22 +230,109 @@ def gather_historic(db_conn, start_date, end_date=None, namespaces=None):
 
     return(datapoints)
 
-def main():
+def populate_database(start_date, end_date):
     '''
-    Run some tests.
-    '''
-    logging.basicConfig(level=logging.INFO)
-    
-    db_conn = db.connect('enwiki.labsdb', 'enwiki_p', '~/replica.my.cnf')
-   
-    datapoint = gather_data(db_conn, dt.date(2017,1,7))
-    print(datapoint)
+    Gather data of page moves between the given dates and populate our
+    database with the results.
 
-    start = dt.date(2017,1, 1)
-    end = dt.date(2017,1,8)
-    # datapoints = gather_historic(db_conn, start, end)
-    # print(datapoints[0])
-    # print(datapoints[-1])
+    :param start_date: First date to gather data for
+    :type start_date: datetime.date
+
+    :param last_date: Date to gather data up to, but not including
+    :type last_date: datetime.date
+    '''
+
+    insert_query = '''INSERT INTO pages_moved_into_main
+                      VALUES (%s, %s, %s)'''
+    
+    ## Database setups for our local tool database and the English WP replica
+    db_conf = '~/replica.my.cnf'
+    local_db = {'hostname': 'tools.labsdb',
+                'dbname': 's53463__actrial_p',
+                'dbconf': db_conf}
+    wiki_db = {'hostname': 'enwiki.analytics.db.svc.eqiad.wmflabs',
+               'dbname': 'enwiki_p',
+               'dbconf': db_conf}
+
+    local_db_conn = db.connect(local_db['hostname'], local_db['dbname'],
+                               local_db['dbconf'])
+    if not local_db_conn:
+        logging.error('unable to connect to local database server {}'.format(local_db['hostname']))
+        return()
+
+    wiki_db_conn = db.connect(wiki_db['hostname'], wiki_db['dbname'],
+                              wiki_db['dbconf'])
+    if not wiki_db_conn:
+        logging.error('unable to connect to replicated database server {}'.format(wiki_db['hostname']))
+        return()
+
+    enwiki_namespaces = get_namespaces()
+    
+    ## Let's try to populate this a week at a time:
+    time_step = dt.timedelta(days=7)
+   
+    cur_date = start_date
+    while cur_date < end_date:
+        stop_date = cur_date + time_step
+        if stop_date > end_date:
+            stop_date = end_date
+
+        moves = gather_historic(wiki_db_conn, cur_date, stop_date,
+                                enwiki_namespaces)
+
+        ## Because data gathering might take a bit, the local DB might drop
+        ## the connection. In that case, we reconnect
+        try:
+            with db.cursor(local_db_conn) as db_cursor:
+                db_cursor.execute("SELECT * FROM account_stats LIMIT 1")
+        except MySQLdb.OperationalError as e:
+            local_db_conn = db.connect(local_db['hostname'], local_db['dbname'],
+                                       local_db['dbconf'])
+
+        with db.cursor(local_db_conn) as db_cursor:
+            db_cursor.executemany(insert_query,
+                                  moves)
+
+            logging.info('processed {} datapoints, comitting'.format(len(moves)))
+            local_db_conn.commit()
+
+        # iterate
+        print('Completed inserting data from {} to {}'.format(cur_date,
+                                                              stop_date))
+        cur_date += time_step
+
+    # ok, done
+    return()
+
+def main():
+    import argparse
+
+    def valid_date(d):
+        try:
+            return(dt.datetime.strptime(d, "%Y-%m-%d").date())
+        except ValueError:
+            raise argparse.ArgumentTypeError("Please write dates in the preferred format (YYYY-MM-DD)")
+    
+    cli_parser = argparse.ArgumentParser(
+        description="script to gather data on page moves done during a given date range and populate our database"
+    )
+
+    # Verbosity option
+    cli_parser.add_argument('-v', '--verbose', action='store_true',
+                            help='write informational output')
+
+    cli_parser.add_argument('start_date', type=valid_date,
+                            help='start date for gathering data (format: YYYY-MM-DD)')
+
+    cli_parser.add_argument('end_date', type=valid_date,
+                            help='end date for gathering data (format: YYYY-MM-DD)')
+
+    args = cli_parser.parse_args()
+
+    if args.verbose:
+        logging.basicConfig(level=logging.INFO)
+
+    populate_database(args.start_date, args.end_date)
     
     return()
 

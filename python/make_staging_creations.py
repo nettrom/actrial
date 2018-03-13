@@ -48,8 +48,8 @@ def populate_table(table_name, input_filename, batch_size=1000):
     '''
 
     insert_query = '''INSERT INTO {table}
-                      (ac_page_id, ac_timestamp)
-                      VALUES (%s, %s)'''.format(table=table_name)
+                      (ac_page_id, ac_timestamp, ac_rev_id)
+                      VALUES (%s, %s, %s)'''.format(table=table_name)
 
     db_conn = db.connect('analytics-store.eqiad.wmnet',
                          'staging', '~/.my.research.cnf')
@@ -64,15 +64,18 @@ def populate_table(table_name, input_filename, batch_size=1000):
         datapoints = []
         with db.cursor(db_conn) as db_cursor:
             for line in infile:
-                (rev_timestamp, page_id) = line.strip().split('\t')
+                (rev_timestamp, page_id,
+                 rev_id, stuff) = line.strip().split('\t', 3)
                 rev_timestamp = dt.datetime.strptime(rev_timestamp,
                                                      '%Y-%m-%d %H:%M:%S.0')
                 page_id = int(page_id)
+                rev_id = int(rev_id)
 
                 try:
                     db_cursor.execute(insert_query,
                                       (page_id,
-                                       rev_timestamp.strftime('%Y%m%d%H%M%S')))
+                                       rev_timestamp.strftime('%Y%m%d%H%M%S'),
+                                       rev_id))
                 except MySQLdb.IntegrityError:
                     ## Duplicate key, ignore
                     continue
