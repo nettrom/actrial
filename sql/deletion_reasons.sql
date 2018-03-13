@@ -30,6 +30,9 @@ CREATE TABLE deletion_reasons (
   num_u2 INT NOT NULL DEFAULT 0, -- nonexistent user
   num_u3 INT NOT NULL DEFAULT 0, -- non-free galleries
   num_u5 INT NOT NULL DEFAULT 0, -- blatant misuse of Wikipedia as a web host
+  num_r2 INT NOT NULL DEFAULT 0, -- Cross-namespace redirects
+  num_r3 INT NOT NULL DEFAULT 0, -- Implausible typos
+  num_x1 INT NOT NULL DEFAULT 0, -- Neelix redirects
   num_prod INT NOT NULL DEFAULT 0, -- deletion through PROD or BLPPROD
   num_afd INT NOT NULL DEFAULT 0, -- deletion through AfD
   num_other INT NOT NULL DEFAULT 0, -- other reasons

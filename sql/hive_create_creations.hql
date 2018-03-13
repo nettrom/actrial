@@ -6,9 +6,13 @@
 -- those article creations can be ignored, ref:
 -- https://en.wikipedia.org/wiki/Special:ListGroupRights
 
+-- Note: added check for event_user_id being 0 as the query otherwise
+-- defines a few non-registered edits as creations, which is obviously wrong.
+
 USE wmf;
-SELECT event_timestamp, page_id, revision_id, event_user_id,
-       event_user_groups, event_user_revision_count,
+CREATE TABLE nettrom_articlecreations.creation_data AS
+SELECT event_timestamp, page_id, page_title, revision_id,
+       event_user_id,  event_user_groups, event_user_revision_count,
        unix_timestamp(event_timestamp) -
        unix_timestamp(coalesce(event_user_creation_timestamp,
                               '20050101000000'))
@@ -34,6 +38,6 @@ WHERE wiki_db = 'enwiki'
   AND NOT (ARRAY_CONTAINS(event_user_groups, "sysop")
            OR ARRAY_CONTAINS(event_user_groups, "autoreviewer")
            OR ARRAY_CONTAINS(event_user_groups, "bot"))
+  AND event_user_id > 0
   AND TO_DATE(event_timestamp) >= '2009-01-01'
   AND snapshot = '2017-07_private';
-  
