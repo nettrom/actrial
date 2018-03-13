@@ -1,6 +1,8 @@
 ## Combine the historic and recent datasets of non-autopatrolled article creations
 ## for usage in various analyses.
 
+library(data.table);
+
 historic_creations = fread('bunzip2 -c datasets/creations_main_unpatrolled_historic.tsv.bz2');
 recent_creations = fread('bunzip2 -c datasets/creations_main_unpatrolled_recent.tsv.bz2');
 draft_creations = fread('bunzip2 -c datasets/creations_draft_complete.tsv.bz2');
