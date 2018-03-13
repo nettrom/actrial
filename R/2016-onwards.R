@@ -30,9 +30,9 @@ ggplot(patrolactions_related[c_date >= as.IDate('2016-01-01')],
   geom_smooth(method='loess', span=0.2);
 
 ## Number of active patrollers
-ggplot(patrollers[log_date >= as.IDate('2016-01-01')
-                  & log_date < as.IDate('2017-07-01')],
-       aes(x=log_date, y=num_patrollers)) + geom_line() +
+ggplot(patrol_summary[log_date >= as.IDate('2016-01-01')
+                      & log_date < as.IDate('2017-07-01')],
+       aes(x=log_date, y=ps_num_patrollers)) + geom_line() +
   ggtitle('Active patrollers per day since 2016') +
   xlab('Year') + ylab('Number of active patrollers') +
   scale_y_continuous(expand = c(0, 0), limits = c(0, 175)) +
@@ -50,10 +50,30 @@ ggplot(top_patrollers[log_date >= as.IDate('2016-01-01'),
   geom_smooth(method='loess', span=0.2);
 
 ## Patrol actions per day
-ggplot(patrolactions[log_date >= as.IDate('2016-01-01')],
-       aes(x=log_date, y=num_patrol_actions)) + geom_line() +
+ggplot(patrol_summary[log_date >= as.IDate('2016-01-01')],
+       aes(x=log_date, y=ps_num_patrol_actions)) + geom_line() +
   ggtitle('Patrol actions per day since 2016') +
   xlab('Date') + ylab('Number of patrol actions') +
   scale_x_date(date_breaks='1 month', date_labels = '%Y-%m') +
   scale_y_continuous(expand = c(0, 0), limits = c(0, 2550)) +
+  geom_smooth(method='loess', span=0.2);
+
+## Patrol actions per day with a line for when ACTRIAL started.
+ggplot(patrol_summary[log_date >= as.IDate('2016-01-01')],
+       aes(x=log_date, y=ps_num_patrol_actions)) + geom_line() +
+  ggtitle('Patrol actions per day since 2016') +
+  xlab('Date') + ylab('Number of patrol actions') +
+  scale_x_date(date_breaks='1 month', date_labels = '%Y-%m') +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 2550)) +
+  geom_vline(xintercept=as.Date('2017-09-14'), linetype='dashed') +
+  geom_smooth(method='loess', span=0.2);
+
+## Patrollers active per day, with a line for when ACTRIAL started.
+ggplot(patrol_summary[log_date >= as.IDate('2016-01-01')],
+       aes(x=log_date, y=ps_num_patrollers)) + geom_line() +
+  ggtitle('Active patrollers per day since 2016') +
+  xlab('Year') + ylab('Number of active patrollers') +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 175)) +
+  scale_x_date(date_breaks='1 month', date_labels = '%Y-%m') +
+  geom_vline(xintercept=as.IDate('2017-09-14'), linetype='dashed') +
   geom_smooth(method='loess', span=0.2);

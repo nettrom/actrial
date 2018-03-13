@@ -5,8 +5,7 @@ library(ggplot2);
 library(zoo);
 
 deletion_reasons = fread('datasets/deletion_reasons.tsv');
-
-deletion_reasons[, log_date := as.IDate(dr_date)];
+deletion_reasons[, log_date := as.Date(dr_date)];
 
 ## For each namespace, plot the PROD/AFD/other stats
 
@@ -134,7 +133,6 @@ main_deletions = rbind(
   deletion_reasons[dr_namespace == 0,
                    list(dr_date=log_date, reason='other',
                         num_deletions=num_other+num_u1+num_u2+num_u3+num_u5)]
-  
 );
 
 user_deletions = rbind(
@@ -222,6 +220,7 @@ ggplot(draft_deletions,
   scale_fill_brewer(palette='Set3') +
   ggtitle('Draft deletions, 28-day moving average');
 
+## draft_deletions_split_stacked_28d_MM.png
 ggplot(draft_deletions,
        aes(x=dr_date, y=1 + num_deletions.md28,
            fill=reason)) +
@@ -284,11 +283,12 @@ total_draft_deletions = draft_deletions[
 ## While the moving averages and medians are neat, it is arguably easier
 ## to use LOESS for smoothing a single line. Remember that!
 
+## draft_deletions_per_day_with_trend.png
 ggplot(total_draft_deletions, aes(x=log_date, y=1+num_deletions)) +
   geom_line() +
   scale_y_log10(
     expand = c(0,0),
-    limits = c(1, 15000),
+    limits = c(1, 4e+03),
     breaks = scales::trans_breaks("log10", function(x) 10^x),
     labels = scales::trans_format("log10", scales::math_format(10^.x))
   ) + 
@@ -299,12 +299,13 @@ ggplot(total_draft_deletions, aes(x=log_date, y=1+num_deletions)) +
   geom_smooth(method='loess', span=0.2);
 
 ## More specifically for Jan 2017 onwards:
+## draft_deletions_per_day_with_trend 2017.png
 ggplot(total_draft_deletions[log_date >= '2017-01-01'],
        aes(x=log_date, y=1+num_deletions)) +
   geom_line() +
   scale_y_log10(
     expand = c(0,0),
-    limits = c(1, 15000),
+    limits = c(1, 5e+03),
     breaks = scales::trans_breaks("log10", function(x) 10^x),
     labels = scales::trans_format("log10", scales::math_format(10^.x))
   ) + 
@@ -367,6 +368,12 @@ t.test(log2(1 + total_draft_deletions[
   log2(1 + total_draft_deletions[
     (log_date >= '2017-09-15' & log_date < '2017-12-01')]$num_deletions)
 );
+wilcox.test(total_draft_deletions[
+  (log_date >= '2015-09-15' & log_date < '2015-12-01') |
+    (log_date >= '2016-09-15' & log_date < '2016-12-01')]$num_deletions,
+  total_draft_deletions[
+    (log_date >= '2017-09-15' & log_date < '2017-12-01')]$num_deletions
+);
 
 ## It's about 30 pages/day higher than previously (median 86.5 vs 113), and that's
 ## significant (note the log-transformed t-test).
@@ -418,11 +425,12 @@ data.frame(lapply(draft_deletions_pre_post,
 total_main_deletions = main_deletions[
   , list(num_deletions=sum(num_deletions)), by=dr_date];
 
+## main_deletions_per_day_with_trend.png
 ggplot(total_main_deletions, aes(x=dr_date, y=1+num_deletions)) +
   geom_line() +
   scale_y_log10(
     expand = c(0,0),
-    limits = c(1, 25000),
+    limits = c(1, 22000),
     breaks = scales::trans_breaks("log10", function(x) 10^x),
     labels = scales::trans_format("log10", scales::math_format(10^.x))
     ) + 
@@ -433,13 +441,15 @@ ggplot(total_main_deletions, aes(x=dr_date, y=1+num_deletions)) +
   ggtitle('Main namespace deletions per day') +
   geom_smooth(method='loess', span=0.1);
 
-## More specifically for Jan 2017 onwards:
+## More specifically for Jan 2017 onwards,
+## main_deletions_per_day_with_trend_2017.png
 ggplot(total_main_deletions[dr_date >= '2017-01-01'],
        aes(x=dr_date, y=1+num_deletions)) +
+  geom_vline(xintercept=as.IDate('2017-09-14'), linetype='dashed',
+             alpha=0.75) +
   geom_line() +
   scale_y_log10(
-    expand = c(0,0),
-    limits = c(1, 10000),
+    expand = c(0,0), limits = c(1, 1.1e+04),
     breaks = scales::trans_breaks("log10", function(x) 10^x),
     labels = scales::trans_format("log10", scales::math_format(10^.x))
   ) + 
@@ -448,10 +458,8 @@ ggplot(total_main_deletions[dr_date >= '2017-01-01'],
   scale_x_date(date_breaks='1 month', date_labels = '%m') +
   xlab('Date') + ylab('Number of deletions') +
   ggtitle('Main namespace deletions per day since 2017') +
-  geom_smooth(method='loess', span=0.1) +
-  geom_vline(xintercept=as.IDate('2017-09-14'), linetype='dashed',
-             alpha=0.75);
-
+  geom_smooth(method='loess', span=0.1);
+  
 ## OK, let's look at reasons for deletion. First, overall:
 main_deletions[
   , list(num_deletions=sum(num_deletions),
@@ -630,6 +638,16 @@ t.test(log2(1 + total_main_deletions[
   log2(1 + total_main_deletions[
     (dr_date >= '2017-09-15' & dr_date < '2017-11-15')]$num_deletions)
 );
+wilcox.test(total_main_deletions[
+  (dr_date >= '2012-09-15' & dr_date < '2012-11-15') |
+    (dr_date >= '2013-09-15' & dr_date < '2013-11-15') |
+    (dr_date >= '2014-09-15' & dr_date < '2014-11-15') |
+    (dr_date >= '2015-09-15' & dr_date < '2015-11-15') |
+    (dr_date >= '2016-09-15' & dr_date < '2016-11-15')]$num_deletions,
+  total_main_deletions[
+    (dr_date >= '2017-09-15' & dr_date < '2017-11-15')]$num_deletions
+);
+
 
 ## What's the change in speedy deletions?
 total_main_speedy_deletions = main_deletions[
@@ -680,6 +698,7 @@ t.test(log2(1 + total_main_speedy_deletions[
 total_user_deletions = user_deletions[
   , list(num_deletions=sum(num_deletions)), by=dr_date];
 
+## user_deletions_per_day_with_trend.png
 ggplot(total_user_deletions, aes(x=dr_date, y=1+num_deletions)) +
   geom_line() +
   scale_y_log10(
@@ -695,7 +714,8 @@ ggplot(total_user_deletions, aes(x=dr_date, y=1+num_deletions)) +
   ggtitle('User namespace deletions per day') +
   geom_smooth(method='loess', span=0.1);
 
-## More specifically for Jan 2017 onwards:
+## More specifically for Jan 2017 onwards,
+## user_deletions_per_day_with_trend_2017.png
 ggplot(total_user_deletions[dr_date >= '2017-01-01'],
        aes(x=dr_date, y=1+num_deletions)) +
   geom_line() +
@@ -817,6 +837,15 @@ t.test(log2(1 + total_user_deletions[
   log2(1 + total_user_deletions[
     (dr_date >= '2017-09-15' & dr_date < '2017-11-15')]$num_deletions)
 );
+wilcox.test(total_user_deletions[
+  (dr_date >= '2012-09-15' & dr_date < '2012-11-15') |
+    (dr_date >= '2013-09-15' & dr_date < '2013-11-15') |
+    (dr_date >= '2014-09-15' & dr_date < '2014-11-15') |
+    (dr_date >= '2015-09-15' & dr_date < '2015-11-15') |
+    (dr_date >= '2016-09-15' & dr_date < '2016-11-15')]$num_deletions,
+  total_user_deletions[
+    (dr_date >= '2017-09-15' & dr_date < '2017-11-15')]$num_deletions
+);
 
 ## Geometric means:
 ## Pre-ACTRIAL:
@@ -866,4 +895,44 @@ user_deletions_pre_post[, delta_prop := post_prop - pre_prop];
 ## Round it to two decimals (note that this also rounds delta calculations,
 ## which can look odd):
 data.frame(lapply(user_deletions_pre_post,
+                  function(x) if(is.numeric(x)) round(x, 2) else x))
+
+## Changes in reasons for deletion in the main namespace, comparing 2012-2016
+## with ACTRIAL.
+main_deletions_by_reason_pre_actrial = main_deletions[
+  year(dr_date) >= 2012 & year(dr_date) <= 2016
+  & strftime(dr_date, "%m%d") >= '0915'
+  & strftime(dr_date, "%m%d") < '1115',
+  list(num_deletions=sum(num_deletions),
+       deletions_per_day=round(sum(num_deletions)/(61*5), 3),
+       prop=100*sum(num_deletions)/sum(main_deletions[
+         year(dr_date) >= 2012 & year(dr_date) <= 2016
+         & strftime(dr_date, "%m%d") >= '0915'
+         & strftime(dr_date, "%m%d") < '1115']$num_deletions)), by=reason];
+
+## Calculating the proportion of usage of each reason during ACTRIAL.
+main_deletions_by_reason_actrial = main_deletions[
+  year(dr_date) == 2017
+  & strftime(dr_date, "%m%d") >= '0915'
+  & strftime(dr_date, "%m%d") < '1115',
+  list(num_deletions=sum(num_deletions),
+       deletions_per_day=sum(num_deletions)/61,
+       prop=100*sum(num_deletions)/sum(main_deletions[
+         year(dr_date) == 2017
+         & strftime(dr_date, "%m%d") >= '0915'
+         & strftime(dr_date, "%m%d") < '1115']$num_deletions)), by=reason];
+
+main_deletions_pre_post = main_deletions_by_reason_actrial[
+  , list(reason=reason, post_per_day=deletions_per_day, post_prop=prop)][
+    main_deletions_by_reason_pre_actrial[
+      , list(reason=reason, pre_per_day=deletions_per_day, pre_prop=prop)
+      ], on='reason'
+    ]
+main_deletions_pre_post[, delta_per_day := post_per_day - pre_per_day];
+main_deletions_pre_post[, delta_per_day_prop := 100*delta_per_day/pre_per_day];
+main_deletions_pre_post[, delta_prop := post_prop - pre_prop];
+
+## Round it to two decimals (note that this also rounds delta calculations,
+## which can look odd):
+data.frame(lapply(main_deletions_pre_post,
                   function(x) if(is.numeric(x)) round(x, 2) else x))
