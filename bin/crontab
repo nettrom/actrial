@@ -2,4 +2,10 @@ PATH=/usr/local/bin:/usr/bin:/bin
 
 # Crontab entries for ACTRIAL
 
-0 */6 * * * qsub $HOME/projects/actrial/bin/npp_queue_snapshot.sh
+## Every six hours, take a snapshot of the size of the New Page Patrol queue
+0 */6 * * * qsub -q task $HOME/projects/actrial/bin/npp_queue_snapshot.sh
+
+## Every day at 01:00, run the daily update of our datasets, then at 03:00
+## run the script to update the published ones.
+0 1 * * * qsub -q task $HOME/projects/actrial/bin/update_data.sh
+0 3 * * * qsub -q task $HOME/projects/actrial/bin/publish_datasets.sh
