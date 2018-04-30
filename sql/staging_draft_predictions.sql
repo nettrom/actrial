@@ -27,8 +27,10 @@ CREATE TABLE nettrom_drafts (
 CREATE TABLE nettrom_afc_submissions (
     page_id INT NOT NULL,
     submission_time DATETIME NOT NULL,
-    review_time DATETIME, -- set if we know when it was reviewed, e.g. declined
-    submission_status ENUM('', 'T', 'R', 'D') NOT NULL, -- '' means submitted
+    -- '' means submitted, 'T' is non-submitted, 'W' is withdrawn
+    submission_status ENUM('', 'T', 'R', 'D', 'W'),
+    review_time DATETIME, -- set if we know when it was reviewed, e.g. declined.
+    withdraw_time DATETIME, -- set if the submission was withdrawn
     rev_id INT NOT NULL,
     PRIMARY KEY (page_id, submission_time)
 );

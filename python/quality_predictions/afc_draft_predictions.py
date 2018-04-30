@@ -114,7 +114,8 @@ class AfCSubmission:
         ## Status can take one of four values:
         ## "T" means not submitted for review,
         ## "R" means currently under review,
-        ## "D" means declined, and
+        ## "D" means declined,
+        ## "W" means it was withdrawn (deleted without review),
         ## "" means it is submitted for review
         self.status = status
 
@@ -126,6 +127,10 @@ class AfCSubmission:
 
         self.decliner = '' # username of the reviewer who declined it
         self.decline_timestamp = None # timestamp of the decline
+
+        ## if the submission was withdrawn, the timestamp of the revision where
+        ## it occurred.
+        self.withdraw_timestamp = None
 
         ## Note that if a draft passes AfC, it's moved into Main and the
         ## AfC submission template is removed.
@@ -217,8 +222,16 @@ class QualityPredictor:
             infile.readline() # skip header
             for line in infile:
                 (timestamp, page_id, rev_id) = line.strip().split('\t')
+
+                # if it's not a real timestamp, skip this line
+                if len(timestamp) < 19:
+                    continue
+                elif len(timestamp) > 19:
+                    timestamp = timestamp[:-2]
+                
                 timestamp = dt.datetime.strptime(timestamp,
-                                                 '%Y-%m-%d %H:%M:%S.0')
+                                                 '%Y-%m-%d %H:%M:%S')
+                
                 page_id = int(page_id)
                 rev_id = int(rev_id)
 
@@ -317,10 +330,10 @@ class QualityPredictor:
                           VALUES (%s, %s, %s, %s)'''
 
         ## Query to insert an AfC submission. Page ID, submission timestamp,
-        ## review timestamp, final status, and revision that was submitted
-        ## for review.
+        ## review timestamp, final status, revision that was submitted
+        ## for review, and timestamp of withdrawal.
         insert_afc = '''INSERT INTO nettrom_afc_submissions
-                        VALUES (%s, %s, %s, %s, %s)'''
+                        VALUES (%s, %s, %s, %s, %s, %s)'''
 
         ## Query to insert predictions into the database. Rev ID and timestamp,
         ## the draft prediction and its 4 probabilities,
@@ -348,7 +361,8 @@ class QualityPredictor:
                                            afc_submission.timestamp,
                                            afc_submission.decline_timestamp,
                                            afc_submission.status,
-                                           afc_submission.rev_id))
+                                           afc_submission.rev_id,
+                                           afc_submission.withdraw_timestamp))
 
                         # insert its prediction, if there is one
                         if afc_submission.prediction:
@@ -560,6 +574,10 @@ class QualityPredictor:
 
             prev_rev_content = '' # content of the previous revision, for diff
 
+            ## set of AfC submissions present in the previous revision, so that
+            ## we can identify withdrawn (deleted) submissions.
+            previous_submissions = set()
+            
             # go through the edit history in chronological order
             for revision in revisions:
                 try:
@@ -570,7 +588,11 @@ class QualityPredictor:
                 except mwp.parser.ParserError:
                     ## parsing failed, unable to process this revision
                     continue
-               
+
+                ## AfC submissions in this revision, which we'll diff against
+                ## the previous one to identify withdrawn submissions
+                current_submissions = set()
+                
                 templates = parsed_content.filter_templates()
                 for template in templates:
                     if template.name.lower() != 'afc submission' \
@@ -638,7 +660,10 @@ class QualityPredictor:
                                            status.upper(),
                                            revision.id, None)
                        draft.afc_history[timestamp] = afc
-                    
+
+                    ## We have a submission, add it to the current set
+                    current_submissions.add(afc)
+                       
                     if afc_submitted:
                         draft_results = wikiclass.score(self.draft_model, content)
                         wp10_results = wikiclass.score(self.wp10_model, content)
@@ -659,6 +684,18 @@ class QualityPredictor:
                         afc.prediction.b_prob = wp10_results['probability']['B']
                         afc.prediction.ga_prob = wp10_results['probability']['GA']
                         afc.prediction.fa_prob = wp10_results['probability']['FA']
+
+                ## We've completed checking all templates. Compare the current
+                ## set with the previous set and set ones that have been
+                ## submitted but been deleted to withdrawn ('W')
+                submission_diff = previous_submissions - current_submissions
+                for afc in submission_diff:
+                    if afc.status == '':
+                        afc.status = 'W'
+                        afc.withdraw_timestamp = revision.timestamp
+
+                ## Now we can iterate:
+                previous_submissions = current_submissions
 
         # ok, done
         return()
