@@ -56,7 +56,9 @@ def capture_snapshot():
                         AND page_is_redirect = 0
                         AND page_namespace = 0'''
 
-    insert_query = '''INSERT INTO npp_queue_size VALUES (%s, %s)'''
+    insert_query = '''INSERT INTO npp_queue_size
+                      (npp_timestamp, npp_num_articles)
+                      VALUES (%s, %s)'''
 
     db_conf = '~/replica.my.cnf'
     local_db = {'hostname': 'tools.labsdb',

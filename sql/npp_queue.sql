@@ -3,5 +3,6 @@
 USE s53463__actrial_p;
 CREATE TABLE npp_queue_size (
     npp_timestamp DATETIME NOT NULL PRIMARY KEY,
-    npp_num_articles INT UNSIGNED NOT NULL DEFAULT 0
+    npp_num_articles INT UNSIGNED NOT NULL DEFAULT 0,
+    npp_method ENUM('automatic', 'manual') DEFAULT 'automatic'
 );
